@@ -101,6 +101,9 @@ class MediaRepository @Inject constructor(
 
     private val handler = Handler(Looper.getMainLooper())
 
+    private var wasTimerPause = false
+    private var lastTimerOption: TimerOption? = null
+
     init {
         val controllerBuilder = MediaController.Builder(context, token)
         val futureController = controllerBuilder.buildAsync()
@@ -163,6 +166,8 @@ class MediaRepository @Inject constructor(
     private val timerExpiredReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == TIMER_EXPIRED) {
+                wasTimerPause = true
+                lastTimerOption = _timerOption.value
                 _timerOption.postValue(null)
             }
         }
@@ -255,8 +260,17 @@ class MediaRepository @Inject constructor(
         }
 
         when (isPlaying.value) {
-            true -> pause()
-            else -> play()
+            true -> {
+                wasTimerPause = false
+                pause()
+            }
+            else -> {
+                if (wasTimerPause) {
+                    lastTimerOption?.let { updateTimer(it) }
+                    wasTimerPause = false
+                }
+                play()
+            }
         }
     }
 
@@ -353,6 +367,7 @@ class MediaRepository @Inject constructor(
     }
 
     private fun mediaPreparing() {
+        wasTimerPause = false
         timerOption
             .value
             ?.let { updateTimer(timerOption = null) }
