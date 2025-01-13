@@ -43,9 +43,6 @@ class PlaybackService : MediaSessionService() {
     lateinit var exoPlayer: ExoPlayer
 
     @Inject
-    lateinit var mediaSession: MediaSession
-
-    @Inject
     lateinit var mediaChannel: LissenMediaProvider
 
     @Inject
@@ -60,23 +57,11 @@ class PlaybackService : MediaSessionService() {
     @Inject
     lateinit var requestHeadersProvider: RequestHeadersProvider
 
+    private lateinit var mediaSession: MediaSession
+
     private val playerServiceScope = MainScope()
 
     private val handler = Handler(Looper.getMainLooper())
-
-    private val mediaSession by lazy {
-        MediaSession.Builder(this, exoPlayer)
-            .setCallback(object : MediaSession.Callback {
-                override fun onPlay() {
-                    super.onPlay()
-                    // Notify MediaRepository about external play commands
-                    LocalBroadcastManager
-                        .getInstance(baseContext)
-                        .sendBroadcast(Intent(EXTERNAL_PLAY_COMMAND))
-                }
-            })
-            .build()
-    }
 
     @Suppress("DEPRECATION")
     override fun onStartCommand(
@@ -133,22 +118,73 @@ class PlaybackService : MediaSessionService() {
                 return START_NOT_STICKY
             }
 
-            else -> {
-                return START_NOT_STICKY
-            }
+            else -> return START_NOT_STICKY
         }
     }
 
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo) = mediaSession
+    override fun onCreate() {
+        super.onCreate()
+
+        mediaSession = MediaSession.Builder(this, exoPlayer).build()
+    }
 
     override fun onDestroy() {
-        playerServiceScope.cancel()
-
+        super.onDestroy()
         mediaSession.release()
         exoPlayer.release()
-        exoPlayer.clearMediaItems()
+        handler.removeCallbacksAndMessages(null)
+        playerServiceScope.cancel()
+    }
 
-        super.onDestroy()
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
+
+    private fun setTimer(delay: Double) {
+        val delayMs = delay * 1000
+
+        cancelTimer()
+
+        handler.postDelayed(
+            {
+                pause()
+                LocalBroadcastManager
+                    .getInstance(baseContext)
+                    .sendBroadcast(Intent(TIMER_EXPIRED))
+            },
+            delayMs.toLong(),
+        )
+        Log.d(TAG, "Timer started for $delayMs ms.")
+    }
+
+    private fun cancelTimer() {
+        handler.removeCallbacksAndMessages(null)
+        Log.d(TAG, "Timer canceled.")
+    }
+
+    private fun pause() {
+        playerServiceScope
+            .launch {
+                exoPlayer.playWhenReady = false
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
+    }
+
+    private fun seek(
+        items: List<BookFile>,
+        position: Double?,
+    ) {
+        if (items.isEmpty()) {
+            Log.w(TAG, "Tried to seek position $position in the empty book. Skipping")
+            return
+        }
+
+        when (position) {
+            null -> exoPlayer.seekTo(0, 0)
+            else -> {
+                val positionMs = (position * 1000).toLong()
+                exoPlayer.seekTo(positionMs)
+            }
+        }
     }
 
     @OptIn(UnstableApi::class)
@@ -224,70 +260,6 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
-    private fun setTimer(delay: Double) {
-        val delayMs = delay * 1000
-
-        cancelTimer()
-
-        handler.postDelayed(
-            {
-                pause()
-                LocalBroadcastManager
-                    .getInstance(baseContext)
-                    .sendBroadcast(Intent(TIMER_EXPIRED))
-            },
-            delayMs.toLong(),
-        )
-        Log.d(TAG, "Timer started for $delayMs ms.")
-    }
-
-    private fun cancelTimer() {
-        handler.removeCallbacksAndMessages(null)
-        Log.d(TAG, "Timer canceled.")
-    }
-
-    private fun pause() {
-        playerServiceScope
-            .launch {
-                exoPlayer.playWhenReady = false
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
-            }
-    }
-
-    private fun seek(
-        items: List<BookFile>,
-        position: Double?,
-    ) {
-        if (items.isEmpty()) {
-            Log.w(TAG, "Tried to seek position $position in the empty book. Skipping")
-            return
-        }
-
-        when (position) {
-            null -> exoPlayer.seekTo(0, 0)
-            else -> {
-                val positionMs = (position * 1000).toLong()
-
-                val durationsMs = items.map { (it.duration * 1000).toLong() }
-                val cumulativeDurationsMs = durationsMs.runningFold(0L) { acc, duration -> acc + duration }
-
-                val targetChapterIndex = cumulativeDurationsMs.indexOfFirst { it > positionMs }
-
-                if (targetChapterIndex == -1) {
-                    val lastChapterIndex = items.size - 1
-                    val lastChapterDurationMs = durationsMs.last()
-                    exoPlayer.seekTo(lastChapterIndex, lastChapterDurationMs)
-                    return
-                }
-
-                val chapterStartTimeMs = cumulativeDurationsMs[targetChapterIndex - 1]
-                val chapterProgressMs = positionMs - chapterStartTimeMs
-                exoPlayer.seekTo(targetChapterIndex - 1, chapterProgressMs)
-            }
-        }
-    }
-
     private fun setPlaybackProgress(
         chapters: List<BookFile>,
         progress: MediaProgress?,
@@ -324,7 +296,6 @@ class PlaybackService : MediaSessionService() {
     }
 
     companion object {
-
         const val ACTION_PLAY = "org.grakovne.lissen.player.service.PLAY"
         const val ACTION_PAUSE = "org.grakovne.lissen.player.service.PAUSE"
         const val ACTION_SET_PLAYBACK = "org.grakovne.lissen.player.service.SET_PLAYBACK"
@@ -338,8 +309,6 @@ class PlaybackService : MediaSessionService() {
 
         const val PLAYBACK_READY = "org.grakovne.lissen.player.service.PLAYBACK_READY"
         const val POSITION = "org.grakovne.lissen.player.service.POSITION"
-
-        const val EXTERNAL_PLAY_COMMAND = "external_play_command"
 
         private const val TAG: String = "PlaybackService"
     }
