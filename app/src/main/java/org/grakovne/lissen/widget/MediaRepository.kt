@@ -266,7 +266,16 @@ class MediaRepository @Inject constructor(
             }
             else -> {
                 if (wasTimerPause) {
-                    lastTimerOption?.let { updateTimer(it) }
+                    lastTimerOption?.let { 
+                        when (it) {
+                            is DurationTimerOption -> {
+                                updateTimer(DurationTimerOption(it.originalDuration))
+                            }
+                            is CurrentEpisodeTimerOption -> {
+                                updateTimer(it)
+                            }
+                        }
+                    }
                     wasTimerPause = false
                 }
                 play()
