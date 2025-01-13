@@ -106,23 +106,9 @@ class MediaRepository @Inject constructor(
 
     private val externalPlayReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action == EXTERNAL_PLAY_COMMAND) {
-                if (wasTimerPause) {
-                    lastTimerOption?.let { 
-                        when (it) {
-                            is DurationTimerOption -> {
-                                val newTimer = DurationTimerOption(it.originalDuration)
-                                updateTimer(newTimer)
-                                _timerOption.postValue(newTimer)
-                            }
-                            is CurrentEpisodeTimerOption -> {
-                                updateTimer(it)
-                                _timerOption.postValue(it)
-                            }
-                        }
-                    }
-                    wasTimerPause = false
-                }
+            if (intent?.action == "android.media.AUDIO_BECOMING_NOISY" || 
+                intent?.action == "android.bluetooth.headset.action.AUDIO_STATE_CHANGED") {
+                handlePlayRequest()
             }
         }
     }
@@ -145,12 +131,12 @@ class MediaRepository @Inject constructor(
                         .getInstance(context)
                         .registerReceiver(timerExpiredReceiver, IntentFilter(TIMER_EXPIRED))
 
-                    LocalBroadcastManager
-                        .getInstance(context)
-                        .registerReceiver(
-                            externalPlayReceiver,
-                            IntentFilter(EXTERNAL_PLAY_COMMAND)
-                        )
+                    // Register for external play events
+                    val filter = IntentFilter().apply {
+                        addAction("android.media.AUDIO_BECOMING_NOISY")
+                        addAction("android.bluetooth.headset.action.AUDIO_STATE_CHANGED")
+                    }
+                    context.registerReceiver(externalPlayReceiver, filter)
 
                     mediaController.addListener(object : Player.Listener {
                         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -295,19 +281,7 @@ class MediaRepository @Inject constructor(
                 pause()
             }
             else -> {
-                if (wasTimerPause) {
-                    lastTimerOption?.let { 
-                        when (it) {
-                            is DurationTimerOption -> {
-                                updateTimer(DurationTimerOption(it.originalDuration))
-                            }
-                            is CurrentEpisodeTimerOption -> {
-                                updateTimer(it)
-                            }
-                        }
-                    }
-                    wasTimerPause = false
-                }
+                handlePlayRequest()
                 play()
             }
         }
@@ -524,9 +498,28 @@ class MediaRepository @Inject constructor(
     }
 
     fun onCleared() {
-        LocalBroadcastManager
-            .getInstance(context)
-            .unregisterReceiver(externalPlayReceiver)
+        try {
+            context.unregisterReceiver(externalPlayReceiver)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to unregister external play receiver", e)
+        }
+    }
+
+    private fun handlePlayRequest() {
+        if (wasTimerPause) {
+            lastTimerOption?.let { 
+                when (it) {
+                    is DurationTimerOption -> {
+                        val newTimer = DurationTimerOption(it.originalDuration)
+                        updateTimer(newTimer)
+                    }
+                    is CurrentEpisodeTimerOption -> {
+                        updateTimer(it)
+                    }
+                }
+            }
+            wasTimerPause = false
+        }
     }
 
     private companion object {
