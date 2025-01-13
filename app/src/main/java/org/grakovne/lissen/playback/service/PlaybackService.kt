@@ -64,6 +64,20 @@ class PlaybackService : MediaSessionService() {
 
     private val handler = Handler(Looper.getMainLooper())
 
+    private val mediaSession by lazy {
+        MediaSession.Builder(this, exoPlayer)
+            .setCallback(object : MediaSession.Callback {
+                override fun onPlay() {
+                    super.onPlay()
+                    // Notify MediaRepository about external play commands
+                    LocalBroadcastManager
+                        .getInstance(baseContext)
+                        .sendBroadcast(Intent(EXTERNAL_PLAY_COMMAND))
+                }
+            })
+            .build()
+    }
+
     @Suppress("DEPRECATION")
     override fun onStartCommand(
         intent: Intent?,
@@ -324,6 +338,8 @@ class PlaybackService : MediaSessionService() {
 
         const val PLAYBACK_READY = "org.grakovne.lissen.player.service.PLAYBACK_READY"
         const val POSITION = "org.grakovne.lissen.player.service.POSITION"
+
+        const val EXTERNAL_PLAY_COMMAND = "external_play_command"
 
         private const val TAG: String = "PlaybackService"
     }

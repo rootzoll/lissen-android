@@ -104,6 +104,29 @@ class MediaRepository @Inject constructor(
     private var wasTimerPause = false
     private var lastTimerOption: TimerOption? = null
 
+    private val externalPlayReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == EXTERNAL_PLAY_COMMAND) {
+                if (wasTimerPause) {
+                    lastTimerOption?.let { 
+                        when (it) {
+                            is DurationTimerOption -> {
+                                val newTimer = DurationTimerOption(it.originalDuration)
+                                updateTimer(newTimer)
+                                _timerOption.postValue(newTimer)
+                            }
+                            is CurrentEpisodeTimerOption -> {
+                                updateTimer(it)
+                                _timerOption.postValue(it)
+                            }
+                        }
+                    }
+                    wasTimerPause = false
+                }
+            }
+        }
+    }
+
     init {
         val controllerBuilder = MediaController.Builder(context, token)
         val futureController = controllerBuilder.buildAsync()
@@ -121,6 +144,13 @@ class MediaRepository @Inject constructor(
                     LocalBroadcastManager
                         .getInstance(context)
                         .registerReceiver(timerExpiredReceiver, IntentFilter(TIMER_EXPIRED))
+
+                    LocalBroadcastManager
+                        .getInstance(context)
+                        .registerReceiver(
+                            externalPlayReceiver,
+                            IntentFilter(EXTERNAL_PLAY_COMMAND)
+                        )
 
                     mediaController.addListener(object : Player.Listener {
                         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -491,6 +521,12 @@ class MediaRepository @Inject constructor(
             .getOrNull(trackIndex)
             ?.duration
             ?: 0.0
+    }
+
+    fun onCleared() {
+        LocalBroadcastManager
+            .getInstance(context)
+            .unregisterReceiver(externalPlayReceiver)
     }
 
     private companion object {
